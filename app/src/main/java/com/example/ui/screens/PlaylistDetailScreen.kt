@@ -200,11 +200,11 @@ fun PlaylistDetailScreen(
 
                         FilledTonalButton(
                             onClick = { showAddSongDialog = true },
-                            modifier = Modifier.weight(0.9f).testTag("playlist_add_song_btn")
+                            modifier = Modifier.weight(1.0f).testTag("playlist_add_song_btn")
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Albums")
+                            Text("Ajouter")
                         }
                     }
 
@@ -402,10 +402,17 @@ fun PlaylistDetailScreen(
     }
 
     if (showAddSongDialog) {
-        SelectSongForPlaylistDialog(
+        val allAlbums by viewModel.allAlbums.collectAsStateWithLifecycle()
+        com.example.ui.components.AddItemsToPlaylistDialog(
+            playlistName = playlist?.name ?: "Playlist",
+            albums = allAlbums,
             allSongs = allSongs,
-            onSongSelected = { song ->
-                viewModel.addSongToPlaylist(playlistId, song.id, items.size)
+            onAddAlbums = { albumIds ->
+                viewModel.addAlbumsToPlaylist(playlistId, albumIds)
+                showAddSongDialog = false
+            },
+            onAddSongs = { songIds ->
+                viewModel.addSongsToPlaylist(playlistId, songIds)
                 showAddSongDialog = false
             },
             onDismiss = { showAddSongDialog = false }
@@ -480,13 +487,25 @@ fun PlaylistItemRow(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    text = "${item.song.artist} • ${item.song.formattedDuration()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${item.song.artist} • ${item.song.formattedDuration()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (!item.song.audioUri.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        val isInternal = item.song.audioUri.startsWith("file://")
+                        Text(
+                            text = if (isInternal) "• Stocké localement" else "• Audio lié",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
             }
 
             // Indicateur et poignée de déplacement

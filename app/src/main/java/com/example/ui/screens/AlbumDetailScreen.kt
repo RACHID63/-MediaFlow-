@@ -38,7 +38,7 @@ import com.example.ui.components.DraggableReorderableItem
 import com.example.ui.components.rememberReorderableList
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Timer
@@ -100,6 +100,7 @@ fun AlbumDetailScreen(
     val albumWithSongs by viewModel.getAlbumWithSongs(albumId).collectAsStateWithLifecycle(initialValue = null)
     var showAddSongDialog by remember { mutableStateOf(false) }
     var showSleepTimerDialog by remember { mutableStateOf(false) }
+    var showAddAlbumToPlaylistDialog by remember { mutableStateOf(false) }
     val loopMode by viewModel.loopMode.collectAsStateWithLifecycle()
     val timerState by viewModel.timerState.collectAsStateWithLifecycle()
 
@@ -246,23 +247,33 @@ fun AlbumDetailScreen(
                         }
                     }
 
-                    // Boutons d'action : Écouter l'album & Changer pochette
+                    // Boutons d'action : Écouter l'album, Ajouter à playlist & Changer pochette
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 14.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Button(
                             onClick = {
                                 albumWithSongs?.let { viewModel.playAlbum(it) }
                             },
                             enabled = songs.isNotEmpty(),
-                            modifier = Modifier.weight(1.2f).testTag("play_album_btn")
+                            modifier = Modifier.weight(1.1f).testTag("play_album_btn")
                         ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Écouter l'album")
+                            Text("Écouter")
+                        }
+
+                        OutlinedButton(
+                            onClick = { showAddAlbumToPlaylistDialog = true },
+                            enabled = songs.isNotEmpty(),
+                            modifier = Modifier.weight(1.1f).testTag("album_add_to_playlist_btn")
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Playlist")
                         }
 
                         OutlinedButton(
@@ -271,7 +282,7 @@ fun AlbumDetailScreen(
                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                 )
                             },
-                            modifier = Modifier.weight(1f).testTag("album_change_cover_btn")
+                            modifier = Modifier.weight(0.9f).testTag("album_change_cover_btn")
                         ) {
                             Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
@@ -504,6 +515,27 @@ fun AlbumDetailScreen(
             onDismiss = { showSleepTimerDialog = false }
         )
     }
+
+    if (showAddAlbumToPlaylistDialog && album != null) {
+        com.example.ui.components.AddWholeAlbumToPlaylistDialog(
+            albumTitle = album.title,
+            playlists = playlists,
+            onSelectPlaylist = { playlistId ->
+                viewModel.addAlbumToPlaylist(albumId, playlistId)
+                showAddAlbumToPlaylistDialog = false
+            },
+            onCreateNewPlaylistWithAlbum = { playlistName ->
+                viewModel.createPlaylistWithSelection(
+                    name = playlistName,
+                    description = "Album complet : ${album.title} - ${album.artist}",
+                    coverUri = album.coverUri,
+                    albumIds = listOf(albumId)
+                )
+                showAddAlbumToPlaylistDialog = false
+            },
+            onDismiss = { showAddAlbumToPlaylistDialog = false }
+        )
+    }
 }
 
 @Composable
@@ -561,13 +593,25 @@ fun SongRowItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Text(
-                    text = "${song.artist} • ${song.formattedDuration()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "${song.artist} • ${song.formattedDuration()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (!song.audioUri.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        val isInternal = song.audioUri.startsWith("file://")
+                        Text(
+                            text = if (isInternal) "• Stocké localement" else "• Audio lié",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
             }
 
             // Bouton écouter
@@ -590,7 +634,7 @@ fun SongRowItem(
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(
                         text = { Text("Ajouter à une playlist") },
-                        leadingIcon = { Icon(Icons.Default.PlaylistAdd, contentDescription = null) },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = null) },
                         onClick = {
                             showMenu = false
                             showPlaylistPicker = true

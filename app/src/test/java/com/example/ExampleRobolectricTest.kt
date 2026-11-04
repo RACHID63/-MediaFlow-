@@ -170,4 +170,113 @@ class ExampleRobolectricTest {
         com.example.util.ImageStorageHelper.deleteInternalImageIfPresent(context, persistedUri)
         org.junit.Assert.assertFalse("Le fichier interne doit être supprimé", targetFile.exists())
     }
+
+    @Test
+    fun `audio storage helper copies audio to internal audios directory and cleans up on delete`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+
+        // Simuler un fichier audio téléchargé dans Downloads (ex: piste_01.mp3)
+        val tempAudioFile = java.io.File(context.cacheDir, "ma_chanson.mp3").apply {
+            writeBytes("fake-mp3-audio-bytes".toByteArray())
+        }
+        val sourceUri = android.net.Uri.fromFile(tempAudioFile).toString()
+
+        val persistedUri = com.example.util.AudioStorageHelper.persistAudioToInternalStorage(
+            context = context,
+            sourceUriStr = sourceUri,
+            originalFileName = "ma_chanson.mp3",
+            prefix = "test_track"
+        )
+
+        assertNotNull(persistedUri)
+        org.junit.Assert.assertTrue(persistedUri!!.startsWith("file://"))
+
+        val targetPath = android.net.Uri.parse(persistedUri).path
+        assertNotNull(targetPath)
+        val targetFile = java.io.File(targetPath!!)
+        org.junit.Assert.assertTrue("Le fichier audio doit exister dans filesDir/audios", targetFile.exists())
+        org.junit.Assert.assertTrue(targetFile.absolutePath.contains("audios"))
+        org.junit.Assert.assertTrue(targetFile.name.endsWith(".mp3"))
+        assertEquals("fake-mp3-audio-bytes", targetFile.readText())
+
+        // Simuler la suppression de la chanson dans l'album
+        com.example.util.AudioStorageHelper.deleteInternalAudioIfPresent(context, persistedUri)
+        org.junit.Assert.assertFalse("Le fichier audio interne doit être supprimé après suppression", targetFile.exists())
+    }
+
+    @Test
+    fun `create playlist by selecting multiple entire albums sequences all tracks`() = runBlocking {
+        val albumDao = database.albumDao()
+        val songDao = database.songDao()
+        val playlistDao = database.playlistDao()
+        val mediaItemDao = database.mediaItemDao()
+        val repository = com.example.data.repository.MediaRepository(albumDao, songDao, mediaItemDao, playlistDao)
+
+        // 1. Créer 2 albums avec 2 chansons chacun
+        val album1Id = repository.createAlbum("Album Un", "Artiste A", coverUri = "file:///album1.jpg")
+        val song1A = repository.addSong(album1Id, "Titre 1A", "Artiste A", trackNumber = 1)
+        val song1B = repository.addSong(album1Id, "Titre 1B", "Artiste A", trackNumber = 2)
+
+        val album2Id = repository.createAlbum("Album Deux", "Artiste B", coverUri = "file:///album2.jpg")
+        val song2A = repository.addSong(album2Id, "Titre 2A", "Artiste B", trackNumber = 1)
+        val song2B = repository.addSong(album2Id, "Titre 2B", "Artiste B", trackNumber = 2)
+
+        // 2. Créer une playlist en sélectionnant les 2 albums entiers
+        val playlistId = repository.createPlaylistWithSelection(
+            name = "Mes 2 Albums Favoris",
+            description = "Playlist créée par sélection d'albums entiers",
+            albumIds = listOf(album1Id, album2Id),
+            individualSongIds = emptyList()
+        )
+
+        val playlistWithSongs = repository.getPlaylistWithSongs(playlistId).first()
+        assertNotNull(playlistWithSongs)
+        val items = playlistWithSongs!!.items.sortedBy { it.playlistItem.position }
+        assertEquals(4, items.size)
+        // Vérifier l'ordre de séquençage
+        assertEquals(song1A, items[0].song.id)
+        assertEquals(song1B, items[1].song.id)
+        assertEquals(song2A, items[2].song.id)
+        assertEquals(song2B, items[3].song.id)
+        // La pochette par défaut hérite de la pochette du premier album
+        assertEquals("file:///album1.jpg", playlistWithSongs.playlist.coverUri)
+    }
+
+    @Test
+    fun `create playlist by selecting individual songs and add entire album later`() = runBlocking {
+        val albumDao = database.albumDao()
+        val songDao = database.songDao()
+        val playlistDao = database.playlistDao()
+        val mediaItemDao = database.mediaItemDao()
+        val repository = com.example.data.repository.MediaRepository(albumDao, songDao, mediaItemDao, playlistDao)
+
+        val albumId = repository.createAlbum("Rock Best", "Artiste Rock")
+        val s1 = repository.addSong(albumId, "Intro Rock", "Artiste Rock", 1)
+        val s2 = repository.addSong(albumId, "Solo Rock", "Artiste Rock", 2)
+        val s3 = repository.addSong(albumId, "Outro Rock", "Artiste Rock", 3)
+
+        // Créer une playlist avec seulement s2
+        val playlistId = repository.createPlaylistWithSelection(
+            name = "Best Of Tracks",
+            albumIds = emptyList(),
+            individualSongIds = listOf(s2)
+        )
+        var pWithSongs = repository.getPlaylistWithSongs(playlistId).first()
+        assertEquals(1, pWithSongs?.items?.size)
+        assertEquals(s2, pWithSongs?.items?.get(0)?.song?.id)
+
+        // Ajouter un autre album entier à cette playlist
+        val album2Id = repository.createAlbum("Acoustic Vibes", "Artiste Acoustique")
+        val s4 = repository.addSong(album2Id, "Chanson Douce", "Artiste Acoustique", 1)
+        val s5 = repository.addSong(album2Id, "Vent Frais", "Artiste Acoustique", 2)
+
+        repository.addAlbumToPlaylist(playlistId, album2Id)
+
+        pWithSongs = repository.getPlaylistWithSongs(playlistId).first()
+        assertEquals(3, pWithSongs?.items?.size)
+        val items = pWithSongs!!.items.sortedBy { it.playlistItem.position }
+        assertEquals(s2, items[0].song.id)
+        assertEquals(s4, items[1].song.id)
+        assertEquals(s5, items[2].song.id)
+    }
 }

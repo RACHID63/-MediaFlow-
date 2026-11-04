@@ -9,9 +9,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Album
-import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -167,7 +167,7 @@ fun MainApp(viewModel: MainViewModel) {
                         NavigationBarItem(
                             selected = currentScreen is AppScreen.Playlists,
                             onClick = { viewModel.navigateTo(AppScreen.Playlists) },
-                            icon = { Icon(Icons.Default.QueueMusic, contentDescription = "Playlists") },
+                            icon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "Playlists") },
                             label = { Text("Playlists") },
                             modifier = Modifier.testTag("nav_playlists")
                         )
@@ -189,6 +189,7 @@ fun MainApp(viewModel: MainViewModel) {
                 AlbumsScreen(
                     albums = allAlbums,
                     allSongs = allSongs,
+                    playlists = allPlaylists,
                     onAlbumClick = { albumId -> viewModel.navigateTo(AppScreen.AlbumDetail(albumId)) },
                     onCreateAlbum = { title, artist, genre, year, coverUri, audioUris ->
                         viewModel.createAlbumWithAudioFiles(context, title, artist, genre, year, coverUri, audioUris)
@@ -196,17 +197,27 @@ fun MainApp(viewModel: MainViewModel) {
                     onUpdateAlbum = { album -> viewModel.updateAlbum(album) },
                     onDeleteAlbum = { albumId -> viewModel.deleteAlbum(albumId) },
                     onLoadSamples = { viewModel.loadSampleMusic(context) },
+                    onAddAlbumToPlaylist = { albumId, playlistId ->
+                        viewModel.addAlbumToPlaylist(albumId, playlistId)
+                    },
+                    onCreatePlaylistWithAlbum = { albumId, name ->
+                        viewModel.createPlaylistWithSelection(name = name, albumIds = listOf(albumId))
+                    },
                     modifier = Modifier.padding(innerPadding)
                 )
             }
             AppScreen.Playlists -> {
                 PlaylistsScreen(
                     playlists = allPlaylists,
+                    albums = allAlbums,
+                    allSongs = allSongs,
                     onPlaylistClick = { playlistId -> viewModel.navigateTo(AppScreen.PlaylistDetail(playlistId)) },
                     onStartSlideshow = { playlistId ->
                         viewModel.navigateTo(AppScreen.PlaylistDetail(playlistId))
                     },
-                    onCreatePlaylist = { name, desc -> viewModel.createPlaylist(name, desc) },
+                    onCreatePlaylistWithSelection = { name, desc, coverUri, albumIds, songIds ->
+                        viewModel.createPlaylistWithSelection(name, desc, coverUri, albumIds, songIds)
+                    },
                     onUpdatePlaylist = { playlist -> viewModel.updatePlaylist(playlist) },
                     onDeletePlaylist = { playlistId -> viewModel.deletePlaylist(playlistId) },
                     modifier = Modifier.padding(innerPadding)

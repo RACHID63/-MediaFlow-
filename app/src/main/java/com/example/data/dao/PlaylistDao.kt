@@ -23,6 +23,12 @@ interface PlaylistDao {
     @Query("SELECT * FROM playlists WHERE id = :id")
     fun getPlaylistById(id: Long): Flow<PlaylistEntity?>
 
+    @Query("SELECT COUNT(*) FROM playlist_songs WHERE playlist_id = :playlistId")
+    suspend fun getPlaylistItemCount(playlistId: Long): Int
+
+    @Query("SELECT * FROM playlist_songs WHERE playlist_id = :playlistId ORDER BY position ASC")
+    suspend fun getPlaylistItemsOnce(playlistId: Long): List<PlaylistItemEntity>
+
     @Transaction
     @Query("SELECT * FROM playlists WHERE id = :playlistId")
     fun getPlaylistWithSongs(playlistId: Long): Flow<PlaylistWithSongs?>

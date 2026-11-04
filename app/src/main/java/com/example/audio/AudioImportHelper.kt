@@ -12,7 +12,8 @@ data class ExtractedAudioMeta(
     val artist: String,
     val albumTitle: String?,
     val durationSeconds: Int,
-    val trackNumber: Int = 1
+    val trackNumber: Int = 1,
+    val originalFileName: String? = null
 )
 
 object AudioImportHelper {
@@ -48,9 +49,9 @@ object AudioImportHelper {
             } catch (_: Exception) {}
         }
 
+        val fileName = queryDisplayName(contentResolver, uri)
         // Si le titre n'était pas dans les tags ID3/RIFF, utiliser le nom du fichier sans son extension (.mp3, .wav, etc.)
         if (title.isNullOrBlank()) {
-            val fileName = queryDisplayName(contentResolver, uri)
             title = fileName.substringBeforeLast(".")
         }
 
@@ -64,7 +65,8 @@ object AudioImportHelper {
             artist = artist,
             albumTitle = album,
             durationSeconds = durationSec,
-            trackNumber = trackIndex
+            trackNumber = trackIndex,
+            originalFileName = fileName
         )
     }
 

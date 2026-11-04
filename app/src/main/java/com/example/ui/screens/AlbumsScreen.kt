@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -67,21 +68,27 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.data.model.AlbumEntity
+import com.example.data.model.PlaylistEntity
 import com.example.data.model.SongEntity
+import com.example.ui.components.AddWholeAlbumToPlaylistDialog
 
 @Composable
 fun AlbumsScreen(
     albums: List<AlbumEntity>,
     allSongs: List<SongEntity>,
+    playlists: List<PlaylistEntity> = emptyList(),
     onAlbumClick: (Long) -> Unit,
     onCreateAlbum: (title: String, artist: String, genre: String, year: Int, coverUri: String?, audioUris: List<Uri>) -> Unit,
     onUpdateAlbum: (AlbumEntity) -> Unit,
     onDeleteAlbum: (Long) -> Unit,
     onLoadSamples: () -> Unit,
+    onAddAlbumToPlaylist: (albumId: Long, playlistId: Long) -> Unit = { _, _ -> },
+    onCreatePlaylistWithAlbum: (albumId: Long, name: String) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var albumToEdit by remember { mutableStateOf<AlbumEntity?>(null) }
+    var albumForPlaylist by remember { mutableStateOf<AlbumEntity?>(null) }
 
     Scaffold(
         floatingActionButton = {
@@ -184,6 +191,7 @@ fun AlbumsScreen(
                             album = album,
                             songsCount = songsForThisAlbum.size,
                             onClick = { onAlbumClick(album.id) },
+                            onAddToPlaylist = { albumForPlaylist = album },
                             onEdit = { albumToEdit = album },
                             onDelete = { onDeleteAlbum(album.id) }
                         )
@@ -231,6 +239,22 @@ fun AlbumsScreen(
             onDismiss = { albumToEdit = null }
         )
     }
+
+    albumForPlaylist?.let { album ->
+        AddWholeAlbumToPlaylistDialog(
+            albumTitle = album.title,
+            playlists = playlists,
+            onSelectPlaylist = { playlistId ->
+                onAddAlbumToPlaylist(album.id, playlistId)
+                albumForPlaylist = null
+            },
+            onCreateNewPlaylistWithAlbum = { playlistName ->
+                onCreatePlaylistWithAlbum(album.id, playlistName)
+                albumForPlaylist = null
+            },
+            onDismiss = { albumForPlaylist = null }
+        )
+    }
 }
 
 @Composable
@@ -238,6 +262,7 @@ fun MusicAlbumCard(
     album: AlbumEntity,
     songsCount: Int,
     onClick: () -> Unit,
+    onAddToPlaylist: () -> Unit = {},
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -356,6 +381,19 @@ fun MusicAlbumCard(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text("Ajouter à une playlist") },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.PlaylistAdd,
+                                    contentDescription = null
+                                )
+                            },
+                            onClick = {
+                                showMenu = false
+                                onAddToPlaylist()
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("Modifier") },
                             leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },

@@ -63,6 +63,12 @@ class MediaRepository(
     fun getSongsForAlbum(albumId: Long): Flow<List<SongEntity>> =
         songDao.getSongsForAlbum(albumId)
 
+    suspend fun getSongsForAlbumOnce(albumId: Long): List<SongEntity> =
+        songDao.getSongsForAlbumList(albumId)
+
+    suspend fun getSongByIdOnce(id: Long): SongEntity? =
+        songDao.getSongByIdOnce(id)
+
     suspend fun addSong(
         albumId: Long,
         title: String,
@@ -151,5 +157,76 @@ class MediaRepository(
 
     suspend fun removeSongFromPlaylist(playlistItemId: Long) {
         playlistDao.deletePlaylistItem(playlistItemId)
+    }
+
+    suspend fun getPlaylistItemCount(playlistId: Long): Int =
+        playlistDao.getPlaylistItemCount(playlistId)
+
+    suspend fun addSongsToPlaylist(playlistId: Long, songIds: List<Long>) {
+        if (songIds.isEmpty()) return
+        val currentCount = playlistDao.getPlaylistItemCount(playlistId)
+        val items = songIds.mapIndexed { index, songId ->
+            PlaylistItemEntity(
+                playlistId = playlistId,
+                songId = songId,
+                position = currentCount + index
+            )
+        }
+        playlistDao.insertPlaylistItems(items)
+    }
+
+    suspend fun addAlbumToPlaylist(playlistId: Long, albumId: Long) {
+        val songs = songDao.getSongsForAlbumList(albumId)
+        addSongsToPlaylist(playlistId, songs.map { it.id })
+    }
+
+    suspend fun addAlbumsToPlaylist(playlistId: Long, albumIds: List<Long>) {
+        val allSongIds = mutableListOf<Long>()
+        for (albumId in albumIds) {
+            val songs = songDao.getSongsForAlbumList(albumId)
+            allSongIds.addAll(songs.map { it.id })
+        }
+        addSongsToPlaylist(playlistId, allSongIds)
+    }
+
+    suspend fun createPlaylistWithSelection(
+        name: String,
+        description: String = "",
+        coverUri: String? = null,
+        albumIds: List<Long> = emptyList(),
+        individualSongIds: List<Long> = emptyList()
+    ): Long {
+        val allSongIds = mutableListOf<Long>()
+        for (albumId in albumIds) {
+            val songs = songDao.getSongsForAlbumList(albumId)
+            allSongIds.addAll(songs.map { it.id })
+        }
+        allSongIds.addAll(individualSongIds)
+
+        var finalCover = coverUri
+        if (finalCover.isNullOrBlank() && albumIds.isNotEmpty()) {
+            val firstAlbum = albumDao.getAlbumByIdOnce(albumIds.first())
+            finalCover = firstAlbum?.coverUri
+        }
+        if (finalCover.isNullOrBlank() && allSongIds.isNotEmpty()) {
+            val firstSong = songDao.getSongByIdOnce(allSongIds.first())
+            if (firstSong != null) {
+                val album = albumDao.getAlbumByIdOnce(firstSong.albumId)
+                finalCover = album?.coverUri
+            }
+        }
+
+        val playlistId = createPlaylist(name, description, finalCover)
+        if (allSongIds.isNotEmpty()) {
+            val items = allSongIds.mapIndexed { index, songId ->
+                PlaylistItemEntity(
+                    playlistId = playlistId,
+                    songId = songId,
+                    position = index
+                )
+            }
+            playlistDao.insertPlaylistItems(items)
+        }
+        return playlistId
     }
 }

@@ -20,6 +20,9 @@ interface SongDao {
     @Query("SELECT * FROM songs WHERE album_id = :albumId ORDER BY track_number ASC")
     fun getSongsForAlbum(albumId: Long): Flow<List<SongEntity>>
 
+    @Query("SELECT * FROM songs WHERE album_id = :albumId ORDER BY track_number ASC")
+    suspend fun getSongsForAlbumList(albumId: Long): List<SongEntity>
+
     @Query("SELECT * FROM songs WHERE id = :id")
     fun getSongById(id: Long): Flow<SongEntity?>
 

@@ -22,9 +22,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -51,15 +51,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.data.model.AlbumEntity
 import com.example.data.model.PlaylistEntity
+import com.example.data.model.SongEntity
 import com.example.ui.components.CreateOrEditDialog
+import com.example.ui.components.CreatePlaylistWithSelectionDialog
 
 @Composable
 fun PlaylistsScreen(
     playlists: List<PlaylistEntity>,
+    albums: List<AlbumEntity> = emptyList(),
+    allSongs: List<SongEntity> = emptyList(),
     onPlaylistClick: (Long) -> Unit,
     onStartSlideshow: (Long) -> Unit,
-    onCreatePlaylist: (name: String, description: String) -> Unit,
+    onCreatePlaylist: (name: String, description: String) -> Unit = { _, _ -> },
+    onCreatePlaylistWithSelection: (name: String, description: String, coverUri: String?, albumIds: List<Long>, songIds: List<Long>) -> Unit = { n, d, c, a, s -> },
     onUpdatePlaylist: (PlaylistEntity) -> Unit,
     onDeletePlaylist: (Long) -> Unit,
     modifier: Modifier = Modifier
@@ -88,12 +94,12 @@ fun PlaylistsScreen(
         ) {
             Spacer(modifier = Modifier.height(12.dp))
             Text(
-                text = "Playlists Multimédia",
+                text = "Playlists Musicales",
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "Regroupez et ordonnez vos photos pour un affichage continu",
+                text = "Créez vos playlists par albums complets ou par sélection de titres",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -110,7 +116,7 @@ fun PlaylistsScreen(
                         modifier = Modifier.padding(bottom = 80.dp)
                     ) {
                         Icon(
-                            Icons.Default.QueueMusic,
+                            Icons.AutoMirrored.Filled.QueueMusic,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
                             modifier = Modifier.size(64.dp)
@@ -123,7 +129,7 @@ fun PlaylistsScreen(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Créez une playlist pour séquencer vos chansons préférées et profiter d'une lecture continue.",
+                            text = "Créez une playlist par albums entiers ou par sélection de chansons pour une écoute continue.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
@@ -151,11 +157,11 @@ fun PlaylistsScreen(
     }
 
     if (showCreateDialog) {
-        CreateOrEditDialog(
-            title = "Créer une Playlist",
-            confirmButtonText = "Créer",
-            onConfirm = { name, desc ->
-                onCreatePlaylist(name, desc)
+        CreatePlaylistWithSelectionDialog(
+            albums = albums,
+            allSongs = allSongs,
+            onConfirm = { name, desc, selectedAlbumIds, selectedSongIds ->
+                onCreatePlaylistWithSelection(name, desc, null, selectedAlbumIds, selectedSongIds)
                 showCreateDialog = false
             },
             onDismiss = { showCreateDialog = false }

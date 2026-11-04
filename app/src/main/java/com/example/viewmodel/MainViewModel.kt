@@ -23,6 +23,7 @@ import com.example.data.model.PlaylistItemEntity
 import com.example.data.model.PlaylistWithSongs
 import com.example.data.model.SongEntity
 import com.example.data.repository.MediaRepository
+import com.example.util.AudioStorageHelper
 import com.example.util.ImageStorageHelper
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -104,6 +105,7 @@ class MainViewModel(
         }
         startPlaybackTicker()
         migrateLegacyContentUris()
+        migrateLegacyAudioUris()
     }
 
     private fun migrateLegacyContentUris() {
@@ -120,6 +122,28 @@ class MainViewModel(
                         )
                         if (persisted != null && persisted != cover) {
                             repository.updateAlbumCover(album.id, persisted)
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun migrateLegacyAudioUris() {
+        viewModelScope.launch {
+            try {
+                val songs = repository.allSongs.first()
+                for (song in songs) {
+                    val audio = song.audioUri
+                    if (audio != null && audio.startsWith("content://")) {
+                        val persisted = AudioStorageHelper.persistAudioToInternalStorage(
+                            context = getApplication(),
+                            sourceUriStr = audio,
+                            originalFileName = song.title,
+                            prefix = "album_${song.albumId}_track_${song.trackNumber}"
+                        )
+                        if (persisted != null && persisted != audio) {
+                            repository.updateSong(song.copy(audioUri = persisted))
                         }
                     }
                 }
@@ -386,8 +410,8 @@ class MainViewModel(
     ) {
         viewModelScope.launch {
             val contentResolver = context.contentResolver
-            val existingSongs = repository.getSongsForAlbum(albumId)
-            var currentTrackCount = 0
+            val existingSongs = repository.getSongsForAlbumOnce(albumId)
+            val currentTrackCount = existingSongs.size
 
             val songsToInsert = mutableListOf<SongEntity>()
 
@@ -406,13 +430,21 @@ class MainViewModel(
                     trackIndex = currentTrackCount + index + 1
                 )
 
+                // Sauvegarde autonome et persistante dans le sous-dossier privé 'audios' de l'application
+                val persistentAudioUri = AudioStorageHelper.persistAudioToInternalStorage(
+                    context = context,
+                    sourceUriStr = uri.toString(),
+                    originalFileName = meta.originalFileName ?: meta.title,
+                    prefix = "album_${albumId}_track_${currentTrackCount + index + 1}"
+                ) ?: uri.toString()
+
                 val song = SongEntity(
                     albumId = albumId,
                     title = meta.title,
                     artist = meta.artist,
                     trackNumber = currentTrackCount + index + 1,
                     durationSeconds = meta.durationSeconds,
-                    audioUri = uri.toString()
+                    audioUri = persistentAudioUri
                 )
                 songsToInsert.add(song)
             }
@@ -444,6 +476,8 @@ class MainViewModel(
             }
 
             val songsToInsert = mutableListOf<SongEntity>()
+            val existingAlbumSongs = repository.getSongsForAlbumOnce(albumId)
+            val currentTrackCount = existingAlbumSongs.size
 
             for ((index, uri) in uris.withIndex()) {
                 try {
@@ -457,16 +491,24 @@ class MainViewModel(
                     context = context,
                     uri = uri,
                     fallbackArtist = "Artiste local",
-                    trackIndex = index + 1
+                    trackIndex = currentTrackCount + index + 1
                 )
+
+                // Sauvegarde autonome et persistante dans le sous-dossier privé 'audios' de l'application
+                val persistentAudioUri = AudioStorageHelper.persistAudioToInternalStorage(
+                    context = context,
+                    sourceUriStr = uri.toString(),
+                    originalFileName = meta.originalFileName ?: meta.title,
+                    prefix = "playlist_${playlistId}_track_${currentTrackCount + index + 1}"
+                ) ?: uri.toString()
 
                 val song = SongEntity(
                     albumId = albumId,
                     title = meta.title,
                     artist = meta.artist,
-                    trackNumber = index + 1,
+                    trackNumber = currentTrackCount + index + 1,
                     durationSeconds = meta.durationSeconds,
-                    audioUri = uri.toString()
+                    audioUri = persistentAudioUri
                 )
                 songsToInsert.add(song)
             }
@@ -603,6 +645,11 @@ class MainViewModel(
         viewModelScope.launch {
             val album = allAlbums.value.firstOrNull { it.id == albumId }
             ImageStorageHelper.deleteInternalImageIfPresent(getApplication(), album?.coverUri)
+            // Supprimer également les fichiers audio associés stockés en interne
+            val songs = repository.getSongsForAlbumOnce(albumId)
+            for (song in songs) {
+                AudioStorageHelper.deleteInternalAudioIfPresent(getApplication(), song.audioUri)
+            }
             repository.deleteAlbum(albumId)
             if (_currentScreen.value is AppScreen.AlbumDetail) {
                 navigateBack()
@@ -639,6 +686,8 @@ class MainViewModel(
 
     fun deleteSong(songId: Long) {
         viewModelScope.launch {
+            val song = repository.getSongByIdOnce(songId)
+            AudioStorageHelper.deleteInternalAudioIfPresent(getApplication(), song?.audioUri)
             repository.deleteSong(songId)
             if (_currentPlayingSong.value?.id == songId) {
                 skipNext()
@@ -683,6 +732,47 @@ class MainViewModel(
     fun addSongToPlaylist(playlistId: Long, songId: Long, currentItemCount: Int) {
         viewModelScope.launch {
             repository.addSongToPlaylist(playlistId, songId, currentItemCount)
+        }
+    }
+
+    fun addSongsToPlaylist(playlistId: Long, songIds: List<Long>) {
+        viewModelScope.launch {
+            repository.addSongsToPlaylist(playlistId, songIds)
+        }
+    }
+
+    fun addAlbumToPlaylist(albumId: Long, playlistId: Long) {
+        viewModelScope.launch {
+            repository.addAlbumToPlaylist(playlistId, albumId)
+        }
+    }
+
+    fun addAlbumsToPlaylist(playlistId: Long, albumIds: List<Long>) {
+        viewModelScope.launch {
+            repository.addAlbumsToPlaylist(playlistId, albumIds)
+        }
+    }
+
+    fun createPlaylistWithSelection(
+        name: String,
+        description: String = "",
+        coverUri: String? = null,
+        albumIds: List<Long> = emptyList(),
+        songIds: List<Long> = emptyList()
+    ) {
+        viewModelScope.launch {
+            val permanentCover = ImageStorageHelper.persistImageToInternalStorage(
+                context = getApplication(),
+                sourceUriStr = coverUri,
+                prefix = "playlist"
+            )
+            repository.createPlaylistWithSelection(
+                name = name,
+                description = description,
+                coverUri = permanentCover,
+                albumIds = albumIds,
+                individualSongIds = songIds
+            )
         }
     }
 
