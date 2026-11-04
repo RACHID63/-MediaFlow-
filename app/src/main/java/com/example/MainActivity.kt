@@ -82,6 +82,9 @@ fun MainApp(viewModel: MainViewModel) {
     val currentCoverUri by viewModel.currentCoverUri.collectAsStateWithLifecycle()
     val isPlaying by viewModel.isPlaying.collectAsStateWithLifecycle()
     val progressSec by viewModel.playbackProgressSec.collectAsStateWithLifecycle()
+    val loopMode by viewModel.loopMode.collectAsStateWithLifecycle()
+    val timerState by viewModel.timerState.collectAsStateWithLifecycle()
+    val playbackMessage by viewModel.playbackMessage.collectAsStateWithLifecycle()
 
     // Charger les albums musicaux d'exemples s'il n'y a pas encore d'album
     LaunchedEffect(Unit) {
@@ -97,10 +100,16 @@ fun MainApp(viewModel: MainViewModel) {
             coverUri = currentCoverUri,
             isPlaying = isPlaying,
             progressSec = progressSec,
+            loopMode = loopMode,
+            timerState = timerState,
             onTogglePlay = { viewModel.togglePlayPause() },
             onSkipNext = { viewModel.skipNext() },
             onSkipPrevious = { viewModel.skipPrevious() },
             onSeek = { viewModel.seekTo(it) },
+            onSetLoopMode = { viewModel.setLoopMode(it) },
+            onStartTimer = { viewModel.startSleepTimer(it) },
+            onCancelTimer = { viewModel.cancelSleepTimer() },
+            onAddTimerMinutes = { viewModel.addTimerMinutes(it) },
             onClose = { viewModel.navigateBack() }
         )
         return
@@ -139,6 +148,8 @@ fun MainApp(viewModel: MainViewModel) {
                     coverUri = currentCoverUri,
                     isPlaying = isPlaying,
                     progressSec = progressSec,
+                    loopMode = loopMode,
+                    timerState = timerState,
                     onTogglePlay = { viewModel.togglePlayPause() },
                     onSkipNext = { viewModel.skipNext() },
                     onClick = { viewModel.navigateTo(AppScreen.NowPlaying) }
@@ -212,7 +223,7 @@ fun MainApp(viewModel: MainViewModel) {
                         val p = allPlaylists.firstOrNull { it.id == playlistId }
                         if (p != null) viewModel.updatePlaylist(p.copy(coverUri = uri))
                     },
-                    onDeleteImage = { /* Optional delete visual */ },
+                    onDeleteImage = { imageId -> viewModel.deleteImage(imageId) },
                     onLoadSamples = { viewModel.loadSampleMusic(context) },
                     modifier = Modifier.padding(innerPadding)
                 )

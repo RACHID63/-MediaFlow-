@@ -13,6 +13,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.R
 import com.example.audio.AudioImportHelper
 import com.example.audio.AudioPlayerManager
+import com.example.audio.PlaybackLoopMode
+import com.example.audio.PlaybackTimerState
 import com.example.data.model.AlbumEntity
 import com.example.data.model.AlbumWithSongs
 import com.example.data.model.MediaItemEntity
@@ -21,12 +23,14 @@ import com.example.data.model.PlaylistItemEntity
 import com.example.data.model.PlaylistWithSongs
 import com.example.data.model.SongEntity
 import com.example.data.repository.MediaRepository
+import com.example.util.ImageStorageHelper
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -76,6 +80,18 @@ class MainViewModel(
     private val _playbackProgressSec = MutableStateFlow(0)
     val playbackProgressSec: StateFlow<Int> = _playbackProgressSec.asStateFlow()
 
+    // Mode de lecture : une seule fois, boucle continue, boucle avec timeline (minuteur)
+    private val _loopMode = MutableStateFlow(PlaybackLoopMode.CONTINUOUS)
+    val loopMode: StateFlow<PlaybackLoopMode> = _loopMode.asStateFlow()
+
+    // Minuteur / Timeline de sommeil
+    private val _timerState = MutableStateFlow(PlaybackTimerState())
+    val timerState: StateFlow<PlaybackTimerState> = _timerState.asStateFlow()
+
+    // Message d'information (ex: "Minuteur expiré")
+    private val _playbackMessage = MutableStateFlow<String?>(null)
+    val playbackMessage: StateFlow<String?> = _playbackMessage.asStateFlow()
+
     private var currentQueue: List<SongEntity> = emptyList()
     private var currentQueueIndex: Int = 0
     private var tickerJob: Job? = null
@@ -83,10 +99,32 @@ class MainViewModel(
     init {
         audioPlayerManager.onCompletionListener = {
             viewModelScope.launch {
-                skipNext()
+                onTrackAutoCompleted()
             }
         }
         startPlaybackTicker()
+        migrateLegacyContentUris()
+    }
+
+    private fun migrateLegacyContentUris() {
+        viewModelScope.launch {
+            try {
+                val albums = repository.allAlbums.first()
+                for (album in albums) {
+                    val cover = album.coverUri
+                    if (cover != null && cover.startsWith("content://")) {
+                        val persisted = ImageStorageHelper.persistImageToInternalStorage(
+                            context = getApplication(),
+                            sourceUriStr = cover,
+                            prefix = "album_${album.id}"
+                        )
+                        if (persisted != null && persisted != cover) {
+                            repository.updateAlbumCover(album.id, persisted)
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
     }
 
     private fun startPlaybackTicker() {
@@ -96,13 +134,28 @@ class MainViewModel(
                 delay(1000L)
                 val song = _currentPlayingSong.value
                 if (_isPlaying.value && song != null) {
+                    // 1. Décompte de la timeline / minuteur si actif
+                    if (_timerState.value.isActive) {
+                        val currentRemaining = _timerState.value.remainingSeconds
+                        if (currentRemaining <= 1) {
+                            // Temps écoulé : arrêt programmé de la lecture
+                            _timerState.value = PlaybackTimerState()
+                            _isPlaying.value = false
+                            audioPlayerManager.pause()
+                            _playbackMessage.value = "Minuteur écoulé : lecture terminée"
+                        } else {
+                            _timerState.value = _timerState.value.copy(remainingSeconds = currentRemaining - 1)
+                        }
+                    }
+
+                    // 2. Progression de la lecture audio
                     if (!song.audioUri.isNullOrBlank() && audioPlayerManager.isPlaying()) {
                         _playbackProgressSec.value = audioPlayerManager.getCurrentPositionSeconds()
                     } else {
                         // Ticker simulé si fichier d'exemple ou lecture sans flux audio direct
                         val nextSec = _playbackProgressSec.value + 1
                         if (nextSec >= song.durationSeconds) {
-                            skipNext()
+                            onTrackAutoCompleted()
                         } else {
                             _playbackProgressSec.value = nextSec
                         }
@@ -110,6 +163,95 @@ class MainViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * Gestion de la fin automatique d'un morceau selon le mode choisi :
+     * - ONCE : S'arrête à la fin du dernier morceau de l'album / playlist
+     * - CONTINUOUS : Repart en boucle continue à l'infini
+     * - TIMED_CONTINUOUS : Continue en boucle tant que la timeline n'est pas écoulée
+     */
+    private fun onTrackAutoCompleted() {
+        if (currentQueue.isEmpty()) return
+
+        // Vérifier si le minuteur est arrivé à terme
+        if (_timerState.value.isActive && _timerState.value.remainingSeconds <= 0) {
+            _isPlaying.value = false
+            audioPlayerManager.pause()
+            _timerState.value = PlaybackTimerState()
+            _playbackMessage.value = "Minuteur écoulé : lecture terminée"
+            return
+        }
+
+        when (_loopMode.value) {
+            PlaybackLoopMode.ONCE -> {
+                if (currentQueueIndex + 1 < currentQueue.size) {
+                    currentQueueIndex += 1
+                    val nextSong = currentQueue[currentQueueIndex]
+                    playSong(nextSong, _currentCoverUri.value, currentQueue)
+                    resolveCoverForSong(nextSong)
+                } else {
+                    // Fin de l'album ou de la playlist atteinte en mode 1 fois
+                    _isPlaying.value = false
+                    audioPlayerManager.stop()
+                    _playbackProgressSec.value = 0
+                    _playbackMessage.value = "Fin de l'album / playlist (lecture terminée)"
+                }
+            }
+            PlaybackLoopMode.CONTINUOUS, PlaybackLoopMode.TIMED_CONTINUOUS -> {
+                currentQueueIndex = (currentQueueIndex + 1) % currentQueue.size
+                val nextSong = currentQueue[currentQueueIndex]
+                playSong(nextSong, _currentCoverUri.value, currentQueue)
+                resolveCoverForSong(nextSong)
+            }
+        }
+    }
+
+    fun setLoopMode(mode: PlaybackLoopMode) {
+        _loopMode.value = mode
+        if (mode != PlaybackLoopMode.TIMED_CONTINUOUS && _timerState.value.isActive) {
+            // Si l'utilisateur passe explicitement à ONCE ou CONTINUOUS sans minuteur
+            _timerState.value = PlaybackTimerState()
+        } else if (mode == PlaybackLoopMode.TIMED_CONTINUOUS && !_timerState.value.isActive) {
+            // Par défaut si sélectionné directement, régler sur 30 minutes
+            startSleepTimer(30)
+        }
+    }
+
+    fun startSleepTimer(durationMinutes: Int) {
+        val totalSec = durationMinutes * 60
+        _timerState.value = PlaybackTimerState(
+            isActive = true,
+            totalSeconds = totalSec,
+            remainingSeconds = totalSec
+        )
+        _loopMode.value = PlaybackLoopMode.TIMED_CONTINUOUS
+        _playbackMessage.value = "Minuteur activé : $durationMinutes minutes"
+    }
+
+    fun cancelSleepTimer() {
+        _timerState.value = PlaybackTimerState()
+        if (_loopMode.value == PlaybackLoopMode.TIMED_CONTINUOUS) {
+            _loopMode.value = PlaybackLoopMode.CONTINUOUS
+        }
+        _playbackMessage.value = "Minuteur annulé (boucle continue)"
+    }
+
+    fun addTimerMinutes(extraMinutes: Int) {
+        if (_timerState.value.isActive) {
+            val addSec = extraMinutes * 60
+            _timerState.value = _timerState.value.copy(
+                totalSeconds = _timerState.value.totalSeconds + addSec,
+                remainingSeconds = _timerState.value.remainingSeconds + addSec
+            )
+            _playbackMessage.value = "+$extraMinutes min ajoutées au minuteur"
+        } else {
+            startSleepTimer(extraMinutes)
+        }
+    }
+
+    fun clearPlaybackMessage() {
+        _playbackMessage.value = null
     }
 
     fun playSong(song: SongEntity, coverUri: String?, queue: List<SongEntity> = listOf(song)) {
@@ -134,14 +276,30 @@ class MainViewModel(
         }
     }
 
-    fun playAlbum(albumWithSongs: AlbumWithSongs) {
+    fun playAlbum(
+        albumWithSongs: AlbumWithSongs,
+        mode: PlaybackLoopMode? = null,
+        timerMinutes: Int? = null
+    ) {
+        mode?.let { setLoopMode(it) }
+        if (timerMinutes != null && timerMinutes > 0) {
+            startSleepTimer(timerMinutes)
+        }
         val songs = albumWithSongs.songs.sortedBy { it.trackNumber }
         if (songs.isNotEmpty()) {
             playSong(songs.first(), albumWithSongs.album.coverUri, songs)
         }
     }
 
-    fun playPlaylist(playlistWithSongs: PlaylistWithSongs) {
+    fun playPlaylist(
+        playlistWithSongs: PlaylistWithSongs,
+        mode: PlaybackLoopMode? = null,
+        timerMinutes: Int? = null
+    ) {
+        mode?.let { setLoopMode(it) }
+        if (timerMinutes != null && timerMinutes > 0) {
+            startSleepTimer(timerMinutes)
+        }
         val songs = playlistWithSongs.items.sortedBy { it.playlistItem.position }.map { it.song }
         if (songs.isNotEmpty()) {
             playSong(songs.first(), playlistWithSongs.playlist.coverUri, songs)
@@ -333,7 +491,12 @@ class MainViewModel(
         audioUris: List<Uri>
     ) {
         viewModelScope.launch {
-            val albumId = repository.createAlbum(title, artist, genre, year, coverUri)
+            val permanentCover = ImageStorageHelper.persistImageToInternalStorage(
+                context = context,
+                sourceUriStr = coverUri,
+                prefix = "album"
+            )
+            val albumId = repository.createAlbum(title, artist, genre, year, permanentCover)
             if (audioUris.isNotEmpty()) {
                 importAudioFilesToAlbum(context, albumId, audioUris, artist)
             }
@@ -347,16 +510,16 @@ class MainViewModel(
             val imagesToInsert = mutableListOf<MediaItemEntity>()
 
             for (uri in uris) {
-                try {
-                    contentResolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                } catch (_: SecurityException) {}
+                // Sauvegarde persistante dans les fichiers internes de l'application
+                val permanentUri = ImageStorageHelper.persistImageToInternalStorage(
+                    context = context,
+                    sourceUriStr = uri.toString(),
+                    prefix = "gallery"
+                ) ?: uri.toString()
 
                 val title = queryMetadata(contentResolver, uri)
                 val item = MediaItemEntity(
-                    uri = uri.toString(),
+                    uri = permanentUri,
                     title = title,
                     mimeType = contentResolver.getType(uri) ?: "image/jpeg"
                 )
@@ -366,7 +529,11 @@ class MainViewModel(
             if (imagesToInsert.isNotEmpty()) {
                 repository.addImages(imagesToInsert)
                 if (targetAlbumId != null) {
-                    repository.updateAlbumCover(targetAlbumId, imagesToInsert.first().uri)
+                    val cover = imagesToInsert.first().uri
+                    repository.updateAlbumCover(targetAlbumId, cover)
+                    if (_currentPlayingSong.value?.albumId == targetAlbumId) {
+                        _currentCoverUri.value = cover
+                    }
                 }
             }
         }
@@ -394,31 +561,60 @@ class MainViewModel(
         coverUri: String? = null
     ) {
         viewModelScope.launch {
-            repository.createAlbum(title, artist, genre, releaseYear, coverUri)
+            val permanentCover = ImageStorageHelper.persistImageToInternalStorage(
+                context = getApplication(),
+                sourceUriStr = coverUri,
+                prefix = "album"
+            )
+            repository.createAlbum(title, artist, genre, releaseYear, permanentCover)
         }
     }
 
     fun updateAlbum(album: AlbumEntity) {
         viewModelScope.launch {
-            repository.updateAlbum(album)
+            val permanentCover = ImageStorageHelper.persistImageToInternalStorage(
+                context = getApplication(),
+                sourceUriStr = album.coverUri,
+                prefix = "album_${album.id}"
+            )
+            val updatedAlbum = album.copy(coverUri = permanentCover)
+            repository.updateAlbum(updatedAlbum)
+            if (_currentPlayingSong.value?.albumId == album.id) {
+                _currentCoverUri.value = permanentCover
+            }
         }
     }
 
     fun updateAlbumCover(albumId: Long, coverUri: String?) {
         viewModelScope.launch {
-            repository.updateAlbumCover(albumId, coverUri)
+            val permanentCover = ImageStorageHelper.persistImageToInternalStorage(
+                context = getApplication(),
+                sourceUriStr = coverUri,
+                prefix = "album_$albumId"
+            )
+            repository.updateAlbumCover(albumId, permanentCover)
             if (_currentPlayingSong.value?.albumId == albumId) {
-                _currentCoverUri.value = coverUri
+                _currentCoverUri.value = permanentCover
             }
         }
     }
 
     fun deleteAlbum(albumId: Long) {
         viewModelScope.launch {
+            val album = allAlbums.value.firstOrNull { it.id == albumId }
+            ImageStorageHelper.deleteInternalImageIfPresent(getApplication(), album?.coverUri)
             repository.deleteAlbum(albumId)
             if (_currentScreen.value is AppScreen.AlbumDetail) {
                 navigateBack()
             }
+        }
+    }
+
+    fun deleteImage(imageId: Long) {
+        viewModelScope.launch {
+            val item = allImages.value.firstOrNull { it.id == imageId }
+            ImageStorageHelper.deleteInternalImageIfPresent(getApplication(), item?.uri)
+            repository.deleteImage(imageId)
         }
     }
 
@@ -453,18 +649,30 @@ class MainViewModel(
     // --- Playlists ---
     fun createPlaylist(name: String, description: String = "", coverUri: String? = null) {
         viewModelScope.launch {
-            repository.createPlaylist(name, description, coverUri)
+            val permanentCover = ImageStorageHelper.persistImageToInternalStorage(
+                context = getApplication(),
+                sourceUriStr = coverUri,
+                prefix = "playlist"
+            )
+            repository.createPlaylist(name, description, permanentCover)
         }
     }
 
     fun updatePlaylist(playlist: PlaylistEntity) {
         viewModelScope.launch {
-            repository.updatePlaylist(playlist)
+            val permanentCover = ImageStorageHelper.persistImageToInternalStorage(
+                context = getApplication(),
+                sourceUriStr = playlist.coverUri,
+                prefix = "playlist_${playlist.id}"
+            )
+            repository.updatePlaylist(playlist.copy(coverUri = permanentCover))
         }
     }
 
     fun deletePlaylist(playlistId: Long) {
         viewModelScope.launch {
+            val playlist = allPlaylists.value.firstOrNull { it.id == playlistId }
+            ImageStorageHelper.deleteInternalImageIfPresent(getApplication(), playlist?.coverUri)
             repository.deletePlaylist(playlistId)
             if (_currentScreen.value is AppScreen.PlaylistDetail) {
                 navigateBack()

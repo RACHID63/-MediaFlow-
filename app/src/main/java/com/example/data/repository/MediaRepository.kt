@@ -146,7 +146,7 @@ class MediaRepository(
     }
 
     suspend fun reorderPlaylist(playlistId: Long, items: List<PlaylistItemEntity>) {
-        playlistDao.replacePlaylistItems(playlistId, items)
+        playlistDao.updatePlaylistItems(items)
     }
 
     suspend fun removeSongFromPlaylist(playlistItemId: Long) {

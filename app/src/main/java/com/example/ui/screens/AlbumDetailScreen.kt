@@ -39,6 +39,13 @@ import com.example.ui.components.rememberReorderableList
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.unit.sp
+import com.example.audio.PlaybackLoopMode
+import com.example.ui.components.SleepTimerDialog
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -92,6 +99,9 @@ fun AlbumDetailScreen(
 
     val albumWithSongs by viewModel.getAlbumWithSongs(albumId).collectAsStateWithLifecycle(initialValue = null)
     var showAddSongDialog by remember { mutableStateOf(false) }
+    var showSleepTimerDialog by remember { mutableStateOf(false) }
+    val loopMode by viewModel.loopMode.collectAsStateWithLifecycle()
+    val timerState by viewModel.timerState.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
 
@@ -268,6 +278,51 @@ fun AlbumDetailScreen(
                             Text("Pochette")
                         }
                     }
+
+                    // Sélecteur de rotation : 1 fois, boucle continue, timeline
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Rotation :",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        FilterChip(
+                            selected = loopMode == PlaybackLoopMode.ONCE,
+                            onClick = { viewModel.setLoopMode(PlaybackLoopMode.ONCE) },
+                            label = { Text("1 fois", fontSize = 11.sp) },
+                            leadingIcon = {
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(12.dp))
+                            }
+                        )
+                        FilterChip(
+                            selected = loopMode == PlaybackLoopMode.CONTINUOUS,
+                            onClick = { viewModel.setLoopMode(PlaybackLoopMode.CONTINUOUS) },
+                            label = { Text("Boucle", fontSize = 11.sp) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Repeat, contentDescription = null, modifier = Modifier.size(12.dp))
+                            }
+                        )
+                        FilterChip(
+                            selected = loopMode == PlaybackLoopMode.TIMED_CONTINUOUS,
+                            onClick = { showSleepTimerDialog = true },
+                            label = {
+                                Text(
+                                    if (timerState.isActive) "⏱ ${timerState.formattedRemaining()}" else "Timeline",
+                                    fontSize = 11.sp
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(12.dp))
+                            }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -353,7 +408,10 @@ fun AlbumDetailScreen(
                     }
                 }
             } else {
-                val reorderController = rememberReorderableList(songs) { reorderedSongs ->
+                val reorderController = rememberReorderableList(
+                    items = songs,
+                    keyOf = { it.id }
+                ) { reorderedSongs ->
                     viewModel.reorderAlbumSongs(reorderedSongs)
                 }
 
@@ -386,9 +444,9 @@ fun AlbumDetailScreen(
                         }
                     }
 
-                    itemsIndexed(reorderController.currentList, key = { _, song -> song.id }) { index, song ->
+                    itemsIndexed(reorderController.list, key = { _, song -> song.id }) { index, song ->
                         DraggableReorderableItem(
-                            index = index,
+                            itemKey = song.id,
                             controller = reorderController
                         ) { isDragging ->
                             SongRowItem(
@@ -398,7 +456,7 @@ fun AlbumDetailScreen(
                                 playlists = playlists,
                                 isDragging = isDragging,
                                 onPlay = {
-                                    viewModel.playSong(song, album?.coverUri, reorderController.currentList)
+                                    viewModel.playSong(song, album?.coverUri, reorderController.list)
                                 },
                                 onAddToPlaylist = { playlistId ->
                                     viewModel.addSongToPlaylist(playlistId, song.id, 0)
@@ -429,6 +487,21 @@ fun AlbumDetailScreen(
                 showAddSongDialog = false
             },
             onDismiss = { showAddSongDialog = false }
+        )
+    }
+
+    if (showSleepTimerDialog) {
+        SleepTimerDialog(
+            currentTimerState = timerState,
+            onStartTimer = { mins ->
+                viewModel.startSleepTimer(mins)
+                showSleepTimerDialog = false
+            },
+            onCancelTimer = {
+                viewModel.cancelSleepTimer()
+                showSleepTimerDialog = false
+            },
+            onDismiss = { showSleepTimerDialog = false }
         )
     }
 }

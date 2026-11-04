@@ -120,4 +120,54 @@ class ExampleRobolectricTest {
         assertEquals("Something", updatedSongs[0].title)
         assertEquals("Come Together", updatedSongs[1].title)
     }
+
+    @Test
+    fun `playback loop modes and timer state calculations`() {
+        val loopModes = com.example.audio.PlaybackLoopMode.values()
+        assertEquals(3, loopModes.size)
+        assertEquals("Une seule fois", com.example.audio.PlaybackLoopMode.ONCE.label)
+        assertEquals("Boucle continue", com.example.audio.PlaybackLoopMode.CONTINUOUS.label)
+        assertEquals("Boucle avec minuteur", com.example.audio.PlaybackLoopMode.TIMED_CONTINUOUS.label)
+
+        // Test timer state
+        val timer = com.example.audio.PlaybackTimerState(
+            isActive = true,
+            totalSeconds = 1800, // 30 min
+            remainingSeconds = 900 // 15 min restants
+        )
+        assertEquals("15:00", timer.formattedRemaining())
+        assertEquals("30 min", timer.formattedTotal())
+        assertEquals(0.5f, timer.progressFraction, 0.01f)
+    }
+
+    @Test
+    fun `image storage helper copies external uri to internal filesDir permanently`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+
+        // Simuler un fichier temporaire externe (comme un fichier renvoyé par Photo Picker)
+        val tempSourceFile = java.io.File(context.cacheDir, "temp_picked_image.jpg").apply {
+            writeBytes("fake-jpeg-data".toByteArray())
+        }
+        val sourceUri = android.net.Uri.fromFile(tempSourceFile).toString()
+
+        val persistedUri = com.example.util.ImageStorageHelper.persistImageToInternalStorage(
+            context = context,
+            sourceUriStr = sourceUri,
+            prefix = "test_album"
+        )
+
+        assertNotNull(persistedUri)
+        org.junit.Assert.assertTrue(persistedUri!!.startsWith("file://"))
+
+        val targetPath = android.net.Uri.parse(persistedUri).path
+        assertNotNull(targetPath)
+        val targetFile = java.io.File(targetPath!!)
+        org.junit.Assert.assertTrue("Le fichier doit exister dans filesDir/covers", targetFile.exists())
+        org.junit.Assert.assertTrue(targetFile.absolutePath.contains("covers"))
+        assertEquals("fake-jpeg-data", targetFile.readText())
+
+        // Nettoyage
+        com.example.util.ImageStorageHelper.deleteInternalImageIfPresent(context, persistedUri)
+        org.junit.Assert.assertFalse("Le fichier interne doit être supprimé", targetFile.exists())
+    }
 }

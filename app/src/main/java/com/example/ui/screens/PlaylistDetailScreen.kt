@@ -36,6 +36,13 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
 import com.example.ui.components.DraggableReorderableItem
 import com.example.ui.components.rememberReorderableList
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.FilterChip
+import androidx.compose.ui.unit.sp
+import com.example.audio.PlaybackLoopMode
+import com.example.ui.components.SleepTimerDialog
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -82,6 +89,9 @@ fun PlaylistDetailScreen(
 
     val playlistWithSongs by viewModel.getPlaylistWithSongs(playlistId).collectAsStateWithLifecycle(initialValue = null)
     var showAddSongDialog by remember { mutableStateOf(false) }
+    var showSleepTimerDialog by remember { mutableStateOf(false) }
+    val loopMode by viewModel.loopMode.collectAsStateWithLifecycle()
+    val timerState by viewModel.timerState.collectAsStateWithLifecycle()
 
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -197,6 +207,50 @@ fun PlaylistDetailScreen(
                             Text("Albums")
                         }
                     }
+
+                    // Sélecteur de mode de rotation : 1 fois, boucle continue, timeline
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Rotation :",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        FilterChip(
+                            selected = loopMode == PlaybackLoopMode.ONCE,
+                            onClick = { viewModel.setLoopMode(PlaybackLoopMode.ONCE) },
+                            label = { Text("1 fois", fontSize = 11.sp) },
+                            leadingIcon = {
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(12.dp))
+                            }
+                        )
+                        FilterChip(
+                            selected = loopMode == PlaybackLoopMode.CONTINUOUS,
+                            onClick = { viewModel.setLoopMode(PlaybackLoopMode.CONTINUOUS) },
+                            label = { Text("Boucle", fontSize = 11.sp) },
+                            leadingIcon = {
+                                Icon(Icons.Default.Repeat, contentDescription = null, modifier = Modifier.size(12.dp))
+                            }
+                        )
+                        FilterChip(
+                            selected = loopMode == PlaybackLoopMode.TIMED_CONTINUOUS,
+                            onClick = { showSleepTimerDialog = true },
+                            label = {
+                                Text(
+                                    if (timerState.isActive) "⏱ ${timerState.formattedRemaining()}" else "Timeline",
+                                    fontSize = 11.sp
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(12.dp))
+                            }
+                        )
+                    }
                 }
             }
 
@@ -253,7 +307,10 @@ fun PlaylistDetailScreen(
                     }
                 }
             } else {
-                val reorderController = rememberReorderableList(items) { reorderedItems ->
+                val reorderController = rememberReorderableList(
+                    items = items,
+                    keyOf = { it.playlistItem.id }
+                ) { reorderedItems ->
                     viewModel.reorderPlaylistSongs(playlistId, reorderedItems.map { it.playlistItem })
                 }
 
@@ -300,27 +357,27 @@ fun PlaylistDetailScreen(
                         }
                     }
 
-                    itemsIndexed(reorderController.currentList, key = { _, item -> item.playlistItem.id }) { index, itemWithSong ->
+                    itemsIndexed(reorderController.list, key = { _, item -> item.playlistItem.id }) { index, itemWithSong ->
                         DraggableReorderableItem(
-                            index = index,
+                            itemKey = itemWithSong.playlistItem.id,
                             controller = reorderController
                         ) { isDragging ->
                             PlaylistItemRow(
                                 index = index,
-                                totalCount = reorderController.currentList.size,
+                                totalCount = reorderController.list.size,
                                 item = itemWithSong,
                                 isDragging = isDragging,
                                 onPlay = {
                                     viewModel.playSong(
                                         song = itemWithSong.song,
                                         coverUri = playlist?.coverUri,
-                                        queue = reorderController.currentList.map { it.song }
+                                        queue = reorderController.list.map { it.song }
                                     )
                                 },
                                 onMoveUp = {
                                     viewModel.movePlaylistItem(
                                         playlistId = playlistId,
-                                        items = reorderController.currentList.map { it.playlistItem },
+                                        items = reorderController.list.map { it.playlistItem },
                                         fromIndex = index,
                                         toIndex = index - 1
                                     )
@@ -328,7 +385,7 @@ fun PlaylistDetailScreen(
                                 onMoveDown = {
                                     viewModel.movePlaylistItem(
                                         playlistId = playlistId,
-                                        items = reorderController.currentList.map { it.playlistItem },
+                                        items = reorderController.list.map { it.playlistItem },
                                         fromIndex = index,
                                         toIndex = index + 1
                                     )
@@ -352,6 +409,21 @@ fun PlaylistDetailScreen(
                 showAddSongDialog = false
             },
             onDismiss = { showAddSongDialog = false }
+        )
+    }
+
+    if (showSleepTimerDialog) {
+        SleepTimerDialog(
+            currentTimerState = timerState,
+            onStartTimer = { mins ->
+                viewModel.startSleepTimer(mins)
+                showSleepTimerDialog = false
+            },
+            onCancelTimer = {
+                viewModel.cancelSleepTimer()
+                showSleepTimerDialog = false
+            },
+            onDismiss = { showSleepTimerDialog = false }
         )
     }
 }
